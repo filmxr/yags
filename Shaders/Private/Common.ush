@@ -1,0 +1,544 @@
+#pragma once
+
+#include "/Engine/Public/Platform.ush"
+
+#ifndef MAX_SH_ORDER
+#define MAX_SH_ORDER 4
+#endif
+
+#ifndef CHUNK_LEN
+#define CHUNK_LEN 8012998
+#endif
+
+struct FGaussianSplattingVolume;
+struct FPlane;
+struct FGaussianSplattingAppearance;
+
+struct FGaussianSplattingVolumes
+{
+    int Offset;
+
+    void Load(out int Value);
+    void Load(out float4 Value);
+    void Load(out FGaussianSplattingVolume Volume);
+    void Load(out FPlane Plane);
+
+    void PeekAppearance(out float FalloffDistance, out FGaussianSplattingAppearance Appearance);
+    void SkipAppearance();
+
+    bool operator<(int End)
+    {
+        return Offset < End;
+    }
+
+    bool operator<(in FGaussianSplattingVolumes Volumes)
+    {
+        return this < Volumes.Offset;
+    }
+};
+
+struct FGaussianSplattingTransform
+{
+    float3x4 Transform;  // Rotation * Translation
+    float3 Scale;
+
+    float3x3 GetRotation();
+    float3x3 GetRotationInverse();
+    float3 GetTranslation();
+    float3 GetTranslationInverse();
+
+    float3 TransformPosition(in float3 Position);
+    float3 TransformPositionInverse(in float3 Position);
+
+    void AddToTranslation(in float3 Translation);
+    void MultiplyBy(in FGaussianSplattingTransform Rhs);
+    void DivideBy(in FGaussianSplattingTransform Rhs);
+
+    void Invert();
+
+};
+
+struct FGaussianSplat
+{
+    FGaussianSplattingTransform Transform;
+    float3 Normal;
+    float4 Albedo;
+#if MAX_SH_ORDER > 1
+    float3 SH[MAX_SH_ORDER * MAX_SH_ORDER - 1];
+#endif
+};
+
+struct FGaussianSplattingVolume
+{
+    float3x4 Box;
+    float3 Origin;
+    float3 BoxExtent;
+    float SphereRadius;
+    FGaussianSplattingVolumes ConvexElems;
+
+    bool IsInside(in float3 WorldPosition, inout float Distance);
+};
+
+struct FGaussianSplattingAppearance
+{
+    int MaxSHDegree;
+    float3 HSV;
+    float3 Tint;
+    float Gamma;
+};
+
+struct FGaussianSplattingInstance
+{
+    uint Flags;
+    uint BaseModelIndex;
+    uint BaseIndex;
+    FGaussianSplattingTransform ModelTransform;
+    float Scale;
+    float MaxLambda;
+    FGaussianSplattingAppearance Appearance;
+
+    FGaussianSplattingVolumes Crops;
+    FGaussianSplattingVolumes Culls;
+    FGaussianSplattingVolumes LocalAppearances;
+    int End;
+
+    FGaussianSplat GetGaussianSplat(in uint ModelElementIndex);
+    float3 ModelToWorld(in float3 ModelPosition);
+    float3 WorldToModel(in float3 WorldPosition);
+    bool IsShown(in float3 WorldPosition);
+    FGaussianSplattingAppearance GetAppearance(in float3 WorldPosition);
+};
+
+Buffer<min16uint> QuadIndices;
+ByteAddressBuffer Volumes;
+uint InstanceCount;
+int InstanceIndexBitCount;
+uint InstanceIndexBitmask;
+StructuredBuffer<FGaussianSplattingInstance> Instances;
+StructuredBuffer<FGaussianSplat> Models_0;
+StructuredBuffer<FGaussianSplat> Models_1;
+StructuredBuffer<FGaussianSplat> Models_2;
+StructuredBuffer<FGaussianSplat> Models_3;
+StructuredBuffer<FGaussianSplat> Models_4;
+StructuredBuffer<FGaussianSplat> Models_5;
+StructuredBuffer<FGaussianSplat> Models_6;
+StructuredBuffer<FGaussianSplat> Models_7;
+StructuredBuffer<FGaussianSplat> Models_8;
+StructuredBuffer<FGaussianSplat> Models_9;
+StructuredBuffer<FGaussianSplat> Models_10;
+StructuredBuffer<FGaussianSplat> Models_11;
+StructuredBuffer<FGaussianSplat> Models_12;
+StructuredBuffer<FGaussianSplat> Models_13;
+StructuredBuffer<FGaussianSplat> Models_14;
+StructuredBuffer<FGaussianSplat> Models_15;
+StructuredBuffer<FGaussianSplat> Models_16;
+StructuredBuffer<FGaussianSplat> Models_17;
+StructuredBuffer<FGaussianSplat> Models_18;
+StructuredBuffer<FGaussianSplat> Models_19;
+StructuredBuffer<FGaussianSplat> Models_20;
+StructuredBuffer<FGaussianSplat> Models_21;
+StructuredBuffer<FGaussianSplat> Models_22;
+StructuredBuffer<FGaussianSplat> Models_23;
+StructuredBuffer<FGaussianSplat> Models_24;
+StructuredBuffer<FGaussianSplat> Models_25;
+StructuredBuffer<FGaussianSplat> Models_26;
+StructuredBuffer<FGaussianSplat> Models_27;
+StructuredBuffer<FGaussianSplat> Models_28;
+StructuredBuffer<FGaussianSplat> Models_29;
+StructuredBuffer<FGaussianSplat> Models_30;
+StructuredBuffer<FGaussianSplat> Models_31;
+StructuredBuffer<FGaussianSplat> Models_32;
+StructuredBuffer<FGaussianSplat> Models_33;
+StructuredBuffer<FGaussianSplat> Models_34;
+StructuredBuffer<FGaussianSplat> Models_35;
+StructuredBuffer<FGaussianSplat> Models_36;
+StructuredBuffer<FGaussianSplat> Models_37;
+StructuredBuffer<FGaussianSplat> Models_38;
+StructuredBuffer<FGaussianSplat> Models_39;
+StructuredBuffer<FGaussianSplat> Models_40;
+StructuredBuffer<FGaussianSplat> Models_41;
+StructuredBuffer<FGaussianSplat> Models_42;
+StructuredBuffer<FGaussianSplat> Models_43;
+StructuredBuffer<FGaussianSplat> Models_44;
+StructuredBuffer<FGaussianSplat> Models_45;
+StructuredBuffer<FGaussianSplat> Models_46;
+StructuredBuffer<FGaussianSplat> Models_47;
+StructuredBuffer<FGaussianSplat> Models_48;
+StructuredBuffer<FGaussianSplat> Models_49;
+StructuredBuffer<FGaussianSplat> Models_50;
+StructuredBuffer<FGaussianSplat> Models_51;
+StructuredBuffer<FGaussianSplat> Models_52;
+StructuredBuffer<FGaussianSplat> Models_53;
+StructuredBuffer<FGaussianSplat> Models_54;
+StructuredBuffer<FGaussianSplat> Models_55;
+StructuredBuffer<FGaussianSplat> Models_56;
+StructuredBuffer<FGaussianSplat> Models_57;
+StructuredBuffer<FGaussianSplat> Models_58;
+StructuredBuffer<FGaussianSplat> Models_59;
+
+uint SortKeyMaskShift;
+
+uint DepthAsSortKey(in float Depth)
+{
+    uint SortKey = (Depth < 0.0f) ? ~asuint(Depth) : asuint(-Depth);
+    return SortKey >> SortKeyMaskShift;
+}
+
+float SortKeyAsDepth(in uint SortKey)
+{
+    SortKey <<= SortKeyMaskShift;
+    return (asint(SortKey) < 0) ? -asfloat(SortKey) : asfloat(~SortKey);
+}
+
+void GetIndices(
+    in uint Index,
+    out uint InstanceIndex,
+    out uint ModelElementIndex
+)
+{
+    uint Count = InstanceCount;
+    InstanceIndex = 0;
+    while (Count > 0)  // UpperBound
+    {
+        uint Step = Count / 2;
+        uint Middle = InstanceIndex + Step;
+        if (Instances[Middle].BaseIndex <= Index)
+        {
+            InstanceIndex = Middle + 1;
+            Count -= Step + 1;
+        }
+        else
+        {
+            Count = Step;
+        }
+    }
+    --InstanceIndex;
+    ModelElementIndex = Index - Instances[InstanceIndex].BaseIndex;
+}
+
+uint ComposeElementIndex(in uint InstanceIndex, in uint ModelElementIndex)
+{
+    return InstanceIndex | (ModelElementIndex << InstanceIndexBitCount);
+}
+
+void DecomposeElementIndex(uint ElementIndex, out uint InstanceIndex, out uint ModelElementIndex)
+{
+    InstanceIndex = ElementIndex & InstanceIndexBitmask;
+    ModelElementIndex = ElementIndex >> InstanceIndexBitCount;
+}
+
+float3 GetTranslation(in float3x4 Transform)
+{
+    return Transform._m03_m13_m23;
+}
+
+float3x3 GetRotationAndScale(in float3x4 Transform)
+{
+    return (float3x3) Transform;
+}
+
+float3 TransformPosition(in float3x4 Transform, in float3 Position)
+{
+    return mul(GetRotationAndScale(Transform), Position) + GetTranslation(Transform);
+}
+
+float3x3 FGaussianSplattingTransform::GetRotation()
+{
+    return (float3x3) Transform;
+}
+
+float3x3 FGaussianSplattingTransform::GetRotationInverse()
+{
+    return transpose(GetRotation());
+}
+
+float3 FGaussianSplattingTransform::GetTranslation()
+{
+    return Transform._m03_m13_m23;
+}
+
+float3 FGaussianSplattingTransform::GetTranslationInverse()
+{
+    return mul(GetRotationInverse(), GetTranslation()) / -Scale;
+}
+
+float3 FGaussianSplattingTransform::TransformPosition(in float3 Position)
+{
+    return mul(GetRotation(), Position * Scale) + GetTranslation();
+}
+
+float3 FGaussianSplattingTransform::TransformPositionInverse(in float3 Position)
+{
+    return (mul(GetRotationInverse(), Position - GetTranslation())) / Scale;
+}
+
+void FGaussianSplattingTransform::AddToTranslation(in float3 Translation)
+{
+    Transform._m03_m13_m23 += Translation;
+}
+
+void FGaussianSplattingTransform::MultiplyBy(in FGaussianSplattingTransform Rhs)
+{
+    float3x3 RotationTransposed = transpose(mul(Rhs.GetRotation(), GetRotation()));
+    float4x3 TransformTransposed =
+    {
+        RotationTransposed[0],
+        RotationTransposed[1],
+        RotationTransposed[2],
+        Rhs.TransformPosition(GetTranslation()),
+    };
+    Transform = transpose(TransformTransposed);
+    Scale *= Rhs.Scale;
+}
+
+void FGaussianSplattingTransform::DivideBy(in FGaussianSplattingTransform Rhs)
+{
+    float3x3 RotationTransposed = mul(GetRotationInverse(), Rhs.GetRotation());
+    float4x3 TransformTransposed =
+    {
+        RotationTransposed[0],
+        RotationTransposed[1],
+        RotationTransposed[2],
+        Rhs.TransformPositionInverse(GetTranslation()),
+    };
+    Transform = transpose(TransformTransposed);
+    Scale /= Rhs.Scale;
+}
+
+void FGaussianSplattingTransform::Invert()
+{
+    float4x3 TransformTrasposed =
+    {
+        Transform[0].xyz,
+        Transform[1].xyz,
+        Transform[2].xyz,
+        GetTranslationInverse(),
+    };
+    Transform = transpose(TransformTrasposed);
+    Scale = 1.0f / Scale;
+}
+
+struct FPlane
+{
+    float3 Normal;
+    float Distance;
+
+    float GetDistance(float3 Point)
+    {
+        return dot(Normal, Point) - Distance;
+    }
+};
+
+void FGaussianSplattingVolumes::Load(out int Value)
+{
+    Value = Volumes.Load<int>(Offset);
+    Offset += 4;
+}
+
+void FGaussianSplattingVolumes::Load(out float4 Value)
+{
+    Value = Volumes.Load<float4>(Offset);
+    Offset += 16;
+}
+
+void FGaussianSplattingVolumes::Load(out FGaussianSplattingVolume Volume)
+{
+    int Size = Volumes.Load<int>(Offset);
+    Volume.Box = Volumes.Load<float3x4>(Offset + 4);
+    Volume.Origin = Volumes.Load<float3>(Offset + 52);
+    Volume.BoxExtent = Volumes.Load<float3>(Offset + 64);
+    Volume.SphereRadius = Volumes.Load<float>(Offset + 76);
+    Volume.ConvexElems.Offset = Offset + 80;
+    Offset += Size;
+}
+
+void FGaussianSplattingVolumes::Load(out FPlane Plane)
+{
+    Plane.Normal = Volumes.Load<float3>(Offset);
+    Plane.Distance = Volumes.Load<float>(Offset + 12);
+    Offset += 16;
+}
+
+void FGaussianSplattingVolumes::PeekAppearance(out float FalloffDistance, out FGaussianSplattingAppearance Appearance)
+{
+    FalloffDistance = Volumes.Load<float>(Offset);
+    Appearance.MaxSHDegree = Volumes.Load<int>(Offset + 4);
+    Appearance.HSV = Volumes.Load<float3>(Offset + 8);
+    Appearance.Tint = Volumes.Load<float3>(Offset + 20);
+    Appearance.Gamma = Volumes.Load<float>(Offset + 32);
+}
+
+void FGaussianSplattingVolumes::SkipAppearance()
+{
+    Offset += 36;
+}
+
+bool FGaussianSplattingVolume::IsInside(in float3 WorldPosition, inout float Distance)
+{
+    float3 ModelPosition = TransformPosition(Box, WorldPosition);
+    if (distance(Origin, ModelPosition) > SphereRadius)
+    {
+        return false;
+    }
+    int ConvexElemsNum;
+    ConvexElems.Load(ConvexElemsNum);
+    for (int ConvexElemIndex = 0; ConvexElemIndex < ConvexElemsNum; ++ConvexElemIndex)
+    {
+        int PlanesNum;
+        ConvexElems.Load(PlanesNum);
+        FPlane Plane;
+        float ConvexElemDistance = -1E10;
+        for (int PlaneIndex = 0; PlaneIndex < PlanesNum; ++PlaneIndex)
+        {
+            ConvexElems.Load(Plane);
+            float PlaneDistance = Plane.GetDistance(ModelPosition);
+            ConvexElemDistance = max(ConvexElemDistance, PlaneDistance);
+        }
+        Distance = min(Distance, ConvexElemDistance);
+        if (ConvexElemDistance <= 0.0f)
+        {
+            return true;  // early exit is correct because ConvexElems are disjoint
+        }
+    }
+    return false;
+}
+
+FGaussianSplat FGaussianSplattingInstance::GetGaussianSplat(in uint ModelElementIndex)
+{
+    switch (BaseModelIndex + ModelElementIndex / CHUNK_LEN)
+    {
+        default:
+            return Models_0[ModelElementIndex % CHUNK_LEN];
+#define CASE(N) \
+        case N: \
+            return Models_##N[ModelElementIndex % CHUNK_LEN];
+        CASE(1)
+        CASE(2)
+        CASE(3)
+        CASE(4)
+        CASE(5)
+        CASE(6)
+        CASE(7)
+        CASE(8)
+        CASE(9)
+        CASE(10)
+        CASE(11)
+        CASE(12)
+        CASE(13)
+        CASE(14)
+        CASE(15)
+        CASE(16)
+        CASE(17)
+        CASE(18)
+        CASE(19)
+        CASE(20)
+        CASE(21)
+        CASE(22)
+        CASE(23)
+        CASE(24)
+        CASE(25)
+        CASE(26)
+        CASE(27)
+        CASE(28)
+        CASE(29)
+        CASE(30)
+        CASE(31)
+        CASE(32)
+        CASE(33)
+        CASE(34)
+        CASE(35)
+        CASE(36)
+        CASE(37)
+        CASE(38)
+        CASE(39)
+        CASE(40)
+        CASE(41)
+        CASE(42)
+        CASE(43)
+        CASE(44)
+        CASE(45)
+        CASE(46)
+        CASE(47)
+        CASE(48)
+        CASE(49)
+        CASE(50)
+        CASE(51)
+        CASE(52)
+        CASE(53)
+        CASE(54)
+        CASE(55)
+        CASE(56)
+        CASE(57)
+        CASE(58)
+        CASE(59)
+#undef CASE
+    }
+}
+
+float3 FGaussianSplattingInstance::ModelToWorld(in float3 ModelPosition)
+{
+    return ModelTransform.TransformPosition(ModelPosition);
+}
+
+float3 FGaussianSplattingInstance::WorldToModel(in float3 WorldPosition)
+{
+    return ModelTransform.TransformPositionInverse(WorldPosition);
+}
+
+bool FGaussianSplattingInstance::IsShown(in float3 WorldPosition)
+{
+    FGaussianSplattingVolumes Volumes = Crops;
+    while (Volumes < Culls)
+    {
+        FGaussianSplattingVolume Crop;
+        Volumes.Load(Crop);
+        float Distance = 1E10f;
+        if (!Crop.IsInside(WorldPosition, Distance))
+        {
+            return false;
+        }
+    }
+    while (Volumes < LocalAppearances)
+    {
+        FGaussianSplattingVolume Cull;
+        Volumes.Load(Cull);
+        float Distance = 1E10f;
+        if (Cull.IsInside(WorldPosition, Distance))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+FGaussianSplattingAppearance FGaussianSplattingInstance::GetAppearance(in float3 WorldPosition)
+{
+    FGaussianSplattingAppearance A = Appearance;
+    FGaussianSplattingVolumes Volumes = LocalAppearances;
+    while (Volumes < End)
+    {
+        FGaussianSplattingVolume Volume;
+        Volumes.Load(Volume);
+        float Distance = 1E10f;
+        if (Volume.IsInside(WorldPosition, Distance))
+        {
+            float FalloffDistance;
+            FGaussianSplattingAppearance LocalAppearance;
+            Volumes.PeekAppearance(FalloffDistance, LocalAppearance);
+            A.MaxSHDegree = min(A.MaxSHDegree, LocalAppearance.MaxSHDegree);
+            if (FalloffDistance + Distance > 0.0f)
+            {
+                float Weight = -Distance / FalloffDistance;
+                // Appearance.MaxSHDegree *= Weight;  // hardly can be useful
+                LocalAppearance.HSV.gb *= Weight; // for hue does not make sense, because it results in radial rainbow effect
+                LocalAppearance.Tint = lerp(1.0f, LocalAppearance.Tint, Weight);
+                LocalAppearance.Gamma = lerp(1.0f, LocalAppearance.Gamma, Weight);
+            }
+            A.HSV += LocalAppearance.HSV;
+            A.Tint *= LocalAppearance.Tint;
+            A.Gamma *= LocalAppearance.Gamma;
+        }
+        Volumes.SkipAppearance();
+    }
+    return A;
+}

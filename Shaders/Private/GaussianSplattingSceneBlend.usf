@@ -1,0 +1,26 @@
+#include "/Engine/Public/Platform.ush"
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/ScreenPass.ush"
+
+FScreenTransform InputScreenTransform;
+Texture2D InputColor;
+#if DEPTH_WRITE
+Texture2D<float> InputDepth;
+#endif  // DEPTH_WRITE
+SamplerState Sampler;
+
+float4 MainPS(
+#if DEPTH_WRITE
+    out float DeviceZ : SV_Depth,
+#endif  // DEPTH_WRITE
+    in float4 Position : SV_Position
+) : SV_Target0
+{
+    float2 InputUV = ApplyScreenTransform(Position.xy, InputScreenTransform);
+    float4 ColorValue = Texture2DSample(InputColor, Sampler, InputUV);
+#if DEPTH_WRITE
+    float ReversedZ = InputDepth.Sample(Sampler, InputUV);
+    DeviceZ = ReversedZ * (NearDepthValue - FarDepthValue) + FarDepthValue;
+#endif  // DEPTH_WRITE
+    return ColorValue;
+}

@@ -1,0 +1,88 @@
+#include "Common.ush"
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/ComputeShaderUtils.ush"
+#include "/Engine/Private/AssertionMacros.ush"
+
+uint Count;
+
+Buffer<uint> SumsIn;
+RWBuffer<uint> SumsOut;
+
+#if COMPILER_SUPPORTS_WAVE_SIZE
+WAVESIZE(WAVE_OP_WAVE_SIZE)
+#endif
+[numthreads(NUM_THREADS_PER_GROUP, 1, 1)]
+void ScanForwardCS( // Reduce
+    in uint3 GroupID : SV_GroupID,
+    in uint BatchIndexInGroup : SV_GroupIndex
+)
+{
+    check(WAVE_OP_WAVE_SIZE == WaveGetLaneCount());
+    uint BatchIndexInDispatch = GetUnWrappedDispatchThreadId(
+        GroupID,
+        BatchIndexInGroup,
+        NUM_THREADS_PER_GROUP
+    );
+    uint IndexInDispatch = BatchIndexInDispatch * BATCH_SIZE;
+    if (IndexInDispatch >= Count)
+    {
+        return;
+    }
+    uint NextBatchBaseInDispatch = min(IndexInDispatch + BATCH_SIZE, Count);
+    uint Sum = 0;
+    while (IndexInDispatch < NextBatchBaseInDispatch)
+    {
+        Sum += SumsIn[IndexInDispatch++];
+    }
+    Sum = WaveActiveSum(Sum);
+    if (WaveIsFirstLane())
+    {
+        uint WaveSumIndex = BatchIndexInDispatch / WAVE_OP_WAVE_SIZE;
+        SumsOut[WaveSumIndex] = Sum;
+    }
+}
+
+Buffer<uint> PrefixSumsIn;
+RWBuffer<uint> PrefixSumsOut;
+
+#if COMPILER_SUPPORTS_WAVE_SIZE
+WAVESIZE(WAVE_OP_WAVE_SIZE)
+#endif
+[numthreads(NUM_THREADS_PER_GROUP, 1, 1)]
+void ScanBackwardCS( // Scatter
+    in uint3 GroupID : SV_GroupID,
+    in uint BatchIndexInGroup : SV_GroupIndex
+)
+{
+    check(WAVE_OP_WAVE_SIZE == WaveGetLaneCount());
+    uint BatchIndexInDispatch = GetUnWrappedDispatchThreadId(
+        GroupID,
+        BatchIndexInGroup,
+        NUM_THREADS_PER_GROUP
+    );
+    uint BatchBaseInDispatch = BatchIndexInDispatch * BATCH_SIZE;
+    if (BatchBaseInDispatch >= Count)
+    {
+        return;
+    }
+    uint Sum = 0;
+    uint NextBatchBaseInDispatch = min(BatchBaseInDispatch + BATCH_SIZE, Count);
+    for (uint IndexInDispatch = BatchBaseInDispatch; IndexInDispatch < NextBatchBaseInDispatch; ++IndexInDispatch)
+    {
+        Sum += SumsIn[IndexInDispatch];
+    }
+    uint PrefixSum;
+    if (WaveIsFirstLane())
+    {
+        uint WavePrefixSumIndex = BatchIndexInDispatch / WAVE_OP_WAVE_SIZE;
+        PrefixSum = (WavePrefixSumIndex != 0) ? PrefixSumsIn[WavePrefixSumIndex - 1] : 0;
+    }
+    PrefixSum = WaveReadLaneFirst(PrefixSum) + WavePrefixSum(Sum);
+    for (uint IndexInDispatch = BatchBaseInDispatch; IndexInDispatch < NextBatchBaseInDispatch; ++IndexInDispatch)
+    {
+        PrefixSum += SumsIn[IndexInDispatch];
+        PrefixSumsOut[IndexInDispatch] = PrefixSum;
+    }
+}
+

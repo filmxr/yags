@@ -1,0 +1,45 @@
+#include "Common.ush"
+#include "GaussianSplattingViewMatrix.usf"
+
+#include "/Engine/Private/ComputeShaderUtils.ush"
+
+uint Count;
+RWBuffer<uint> SortKeys;
+RWBuffer<uint> ElementIndices;
+
+#if COMPILER_SUPPORTS_WAVE_SIZE
+WAVESIZE(WAVE_OP_WAVE_SIZE)
+#endif
+[numthreads(NUM_THREADS_PER_GROUP, 1, 1)]
+void PrepareSortKeyValuesCS(
+    in uint3 GroupID : SV_GroupID,
+    in uint GroupThreadIndex : SV_GroupIndex
+)
+{
+    check(WAVE_OP_WAVE_SIZE == WaveGetLaneCount());
+    uint BatchIndexInDispatch = GetUnWrappedDispatchThreadId(
+        GroupID,
+        GroupThreadIndex,
+        NUM_THREADS_PER_GROUP
+    );
+    uint IndexInDispatch = BatchIndexInDispatch * BATCH_SIZE;
+    if (IndexInDispatch >= Count)
+    {
+        return;
+    }
+    uint NextBatchBaseInDispatch = min(IndexInDispatch + BATCH_SIZE, Count);
+    for (; IndexInDispatch < NextBatchBaseInDispatch; ++IndexInDispatch)
+    {
+        uint InstanceIndex;
+        uint ModelElementIndex;
+        GetIndices(IndexInDispatch, InstanceIndex, ModelElementIndex);
+        FGaussianSplattingInstance Instance = Instances[InstanceIndex];
+        FGaussianSplat GaussianSplat = Instance.GetGaussianSplat(ModelElementIndex);
+        float3 ModelPosition = GaussianSplat.Transform.GetTranslation();
+        float3 WorldPosition = Instance.ModelToWorld(ModelPosition);
+        float3 ViewPosition = WorldToView(WorldPosition);
+        SortKeys[IndexInDispatch] = DepthAsSortKey(ViewPosition.z);
+        uint ElementIndex = ComposeElementIndex(InstanceIndex, ModelElementIndex);
+        ElementIndices[IndexInDispatch] = ElementIndex;
+    }
+}

@@ -1,0 +1,365 @@
+#include "Common.ush"
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/ComputeShaderUtils.ush"
+#include "/Engine/Private/AssertionMacros.ush"
+
+#define BATCHES_PER_BITMASK (BITMASK_BITSIZE / BATCH_SIZE)
+#define BATCHES_PER_WAVE (WAVE_OP_WAVE_SIZE / BATCH_SIZE)
+#define BITMASKS_PER_WAVE (WAVE_OP_WAVE_SIZE / BATCHES_PER_BITMASK)
+#define WAVES_PER_BITMASK (BATCHES_PER_BITMASK / WAVE_OP_WAVE_SIZE)
+#define WAVES_PER_BITMASK_COMPONENT (BITMASK_COMPONENT_BITSIZE / WAVE_OP_WAVE_SIZE)
+
+uint Count;
+
+RWBuffer<uint> ElementIndicesOut;
+RWStructuredBuffer<uint4> BitmasksOut;
+RWBuffer<uint> SumsOut;
+
+bool IsShown(uint Index)
+{
+    if (Index >= Count)
+    {
+        return false;
+    }
+    uint InstanceIndex;
+    uint ModelElementIndex;
+    GetIndices(Index, InstanceIndex, ModelElementIndex);
+    ElementIndicesOut[Index] = ComposeElementIndex(InstanceIndex, ModelElementIndex);
+    FGaussianSplattingInstance Instance = Instances[InstanceIndex];
+    FGaussianSplat GaussianSplat = Instance.GetGaussianSplat(ModelElementIndex);
+    float3 ModelPosition = GaussianSplat.Transform.GetTranslation();
+    float3 WorldPosition = Instance.ModelToWorld(ModelPosition);
+    return Instance.IsShown(WorldPosition);
+}
+
+groupshared uint4 GroupBitmasks[NUM_THREADS_PER_GROUP / BATCHES_PER_BITMASK];
+groupshared uint GroupSums[NUM_THREADS_PER_GROUP / BATCHES_PER_BITMASK];
+
+#if COMPILER_SUPPORTS_WAVE_SIZE
+WAVESIZE(WAVE_OP_WAVE_SIZE)
+#endif
+[numthreads(NUM_THREADS_PER_GROUP, 1, 1)]
+void InitCS(
+    in uint3 GroupID : SV_GroupID,
+    in uint BatchIndexInGroup : SV_GroupIndex
+)
+{
+    check(WAVE_OP_WAVE_SIZE == WaveGetLaneCount());
+    uint BatchIndexInDispatch = GetUnWrappedDispatchThreadId(
+        GroupID,
+        BatchIndexInGroup,
+        NUM_THREADS_PER_GROUP
+    );
+    uint BitmaskIndexInDispatch = BatchIndexInDispatch / BATCHES_PER_BITMASK;
+    if (BATCH_SIZE == 1)
+    {
+        bool bBit = IsShown(BatchIndexInDispatch);
+        if (WAVE_OP_WAVE_SIZE == BITMASK_BITSIZE)
+        {
+            uint4 Bitmask = WaveActiveBallot(bBit);
+            uint Sum = WaveActiveCountBits(bBit);
+            if (WaveIsFirstLane())
+            {
+                BitmasksOut[BitmaskIndexInDispatch] = Bitmask;
+                SumsOut[BitmaskIndexInDispatch] = Sum;
+            }
+        }
+        else
+        {
+            uint BitmaskIndexInGroup = BatchIndexInGroup / BATCHES_PER_BITMASK;
+            uint WaveIndexInBitmask;
+            if (WaveIsFirstLane())
+            {
+                WaveIndexInBitmask = (BatchIndexInGroup / WAVE_OP_WAVE_SIZE) % WAVES_PER_BITMASK;
+            }
+            if (WAVE_OP_WAVE_SIZE == 64)
+            {
+                uint2 Bitmask = WaveActiveBallot(bBit).xy;
+                if (WaveIsFirstLane())
+                {
+                    if (WaveIndexInBitmask == 0)
+                    {
+                        GroupBitmasks[BitmaskIndexInGroup].xy = Bitmask;
+                    }
+                    else
+                    {
+                        GroupBitmasks[BitmaskIndexInGroup].zw = Bitmask;
+                    }
+                }
+            }
+            else if (WAVE_OP_WAVE_SIZE == BITMASK_COMPONENT_BITSIZE)
+            {
+                uint Bitmask = WaveActiveBallot(bBit).x;
+                if (WaveIsFirstLane())
+                {
+                    GroupBitmasks[BitmaskIndexInGroup][WaveIndexInBitmask] = Bitmask;
+                }
+            }
+            else // if (WAVE_OP_WAVE_SIZE < 32)
+            {
+                uint Bitmask = WaveActiveBallot(bBit).x;
+                uint WaveIndexInComponent;
+                if (WaveIsFirstLane())
+                {
+                    WaveIndexInComponent = WaveIndexInBitmask % WAVES_PER_BITMASK_COMPONENT;
+                    if (WaveIndexInComponent == 0)
+                    {
+                        GroupBitmasks[BitmaskIndexInGroup][WaveIndexInBitmask / WAVES_PER_BITMASK_COMPONENT] = Bitmask;
+                    }
+                }
+                GroupMemoryBarrierWithGroupSync();
+                if (WaveIsFirstLane())
+                {
+                    if (WaveIndexInComponent != 0)
+                    {
+                        if (WAVES_PER_BITMASK_COMPONENT == 2)
+                        {
+                            Bitmask <<= 16;
+                            GroupBitmasks[BitmaskIndexInGroup][WaveIndexInBitmask / 2] |= Bitmask;
+                        }
+                        else
+                        {
+                            Bitmask <<= WaveIndexInComponent * WAVE_OP_WAVE_SIZE;
+                            InterlockedOr(GroupBitmasks[BitmaskIndexInGroup][WaveIndexInBitmask / WAVES_PER_BITMASK_COMPONENT], Bitmask);
+                        }
+                    }
+                }
+            }
+            GroupMemoryBarrierWithGroupSync();
+            if (WaveIsFirstLane())
+            {
+                if (WaveIndexInBitmask == 0)
+                {
+                    uint4 Bitmask = GroupBitmasks[BitmaskIndexInGroup];
+                    BitmasksOut[BitmaskIndexInDispatch] = Bitmask;
+                    uint4 Sum = countbits(Bitmask);
+                    SumsOut[BitmaskIndexInDispatch] = Sum.x + Sum.y + Sum.z + Sum.w;
+                }
+            }
+        }
+    }
+    else
+    {
+        uint4 Bitmask = 0u;
+        {
+            uint BatchBaseInDispatch = BatchIndexInDispatch * BATCH_SIZE;
+            uint BatchBaseInBitmask = (BatchIndexInGroup % BATCHES_PER_BITMASK) * BATCH_SIZE;
+            for (uint IndexInBatch = 0; IndexInBatch < BATCH_SIZE; ++IndexInBatch)
+            {
+                bool bBit = IsShown(BatchBaseInDispatch + IndexInBatch);
+                if (bBit)
+                {
+                    uint IndexInBitmask = BatchBaseInBitmask + IndexInBatch;
+                    Bitmask[IndexInBitmask / BITMASK_COMPONENT_BITSIZE] |= 1u << (IndexInBitmask % BITMASK_COMPONENT_BITSIZE);
+                }
+            }
+        }
+        if (BATCH_SIZE == BITMASK_BITSIZE)
+        {
+            BitmasksOut[BitmaskIndexInDispatch] = Bitmask;
+            uint4 Sum = countbits(Bitmask);
+            SumsOut[BitmaskIndexInDispatch] = Sum.x + Sum.y + Sum.z + Sum.w;
+        }
+        else if (BATCHES_PER_BITMASK == WAVE_OP_WAVE_SIZE)
+        {
+            Bitmask = WaveActiveBitOr(Bitmask);
+            if (WaveIsFirstLane())
+            {
+                BitmasksOut[BitmaskIndexInDispatch] = Bitmask;
+                uint4 Sum = countbits(Bitmask);
+                SumsOut[BitmaskIndexInDispatch] = Sum.x + Sum.y + Sum.z + Sum.w;
+            }
+        }
+        else if (BATCHES_PER_BITMASK < WAVE_OP_WAVE_SIZE)
+        {
+            for (uint BitmaskIndexInWave = 0; BitmaskIndexInWave < BITMASKS_PER_WAVE; ++BitmaskIndexInWave)
+            {
+                uint BatchIndexInWave = BatchIndexInGroup % BATCHES_PER_WAVE;
+                if ((BatchIndexInWave / BITMASKS_PER_WAVE) == BitmaskIndexInWave)
+                {
+                    Bitmask = WaveActiveBitOr(Bitmask);
+                    if ((BatchIndexInWave % BITMASKS_PER_WAVE) == 0)
+                    {
+                        BitmasksOut[BitmaskIndexInDispatch] = Bitmask;
+                        uint4 Sum = countbits(Bitmask);
+                        SumsOut[BitmaskIndexInDispatch] = Sum.x + Sum.y + Sum.z + Sum.w;
+                    }
+                }
+            }
+        }
+        else // if (BATCHES_PER_BITMASK > WAVE_OP_WAVE_SIZE)
+        {
+            uint BitmaskIndexInGroup = BatchIndexInGroup / BATCHES_PER_BITMASK;
+            Bitmask = WaveActiveBitOr(Bitmask);
+            uint WaveIndexInBitmask;
+            if (WaveIsFirstLane())
+            {
+                WaveIndexInBitmask = (BatchIndexInGroup / WAVE_OP_WAVE_SIZE) % WAVES_PER_BITMASK;
+                if (WaveIndexInBitmask == 0)
+                {
+                    GroupBitmasks[BitmaskIndexInGroup] = Bitmask;
+                }
+            }
+            GroupMemoryBarrierWithGroupSync();
+            if (WaveIsFirstLane())
+            {
+                if (WaveIndexInBitmask != 0)
+                {
+                    InterlockedOr(GroupBitmasks[BitmaskIndexInGroup].x, Bitmask.x);
+                    InterlockedOr(GroupBitmasks[BitmaskIndexInGroup].y, Bitmask.y);
+                    InterlockedOr(GroupBitmasks[BitmaskIndexInGroup].z, Bitmask.z);
+                    InterlockedOr(GroupBitmasks[BitmaskIndexInGroup].w, Bitmask.w);
+                }
+            }
+            GroupMemoryBarrierWithGroupSync();
+            if (WaveIsFirstLane())
+            {
+                if (WaveIndexInBitmask == 0)
+                {
+                    Bitmask = GroupBitmasks[BitmaskIndexInGroup];
+                    BitmasksOut[BitmaskIndexInDispatch] = Bitmask;
+                    uint4 Sum = countbits(Bitmask);
+                    SumsOut[BitmaskIndexInDispatch] = Sum.x + Sum.y + Sum.z + Sum.w;
+                }
+            }
+        }
+    }
+}
+
+StructuredBuffer<uint4> BitmasksIn;
+Buffer<uint> PrefixSumsIn;
+Buffer<uint> ElementIndicesIn;
+
+#if COMPILER_SUPPORTS_WAVE_SIZE
+WAVESIZE(WAVE_OP_WAVE_SIZE)
+#endif
+[numthreads(NUM_THREADS_PER_GROUP, 1, 1)]
+void GatherIndicesCS(
+    in uint3 GroupID : SV_GroupID,
+    in uint BitmaskIndexInGroup : SV_GroupIndex
+)
+{
+    check(WAVE_OP_WAVE_SIZE == WaveGetLaneCount());
+    uint BitmaskIndexInDispatch = GetUnWrappedDispatchThreadId(
+        GroupID,
+        BitmaskIndexInGroup,
+        NUM_THREADS_PER_GROUP
+    );
+    if (BitmaskIndexInDispatch >= Count)
+    {
+        return;
+    }
+    uint4 Bitmask = BitmasksIn[BitmaskIndexInDispatch];
+    uint BitmaskBaseInDispatch = BitmaskIndexInDispatch * BITMASK_BITSIZE;
+    uint ComponentBaseInDispatch = BitmaskBaseInDispatch;
+    uint OutputBase = (BitmaskIndexInDispatch != 0) ? PrefixSumsIn[BitmaskIndexInDispatch - 1] : 0;
+    uint OutputCount = PrefixSumsIn[BitmaskIndexInDispatch] - OutputBase;
+    uint OutputIndex = 0;
+    for (uint ComponentIndex = 0; OutputIndex < OutputCount; ++ComponentIndex)
+    {
+        uint BitmaskComponent = Bitmask[ComponentIndex];
+        for (uint IndexInComponent = 0; BitmaskComponent != 0; ++IndexInComponent)
+        {
+            bool bBit = (BitmaskComponent & 1) != 0;
+            if (bBit)
+            {
+                uint IndexInDispatch = ComponentBaseInDispatch + IndexInComponent;
+                ElementIndicesOut[OutputBase + OutputIndex] = ElementIndicesIn[IndexInDispatch];
+                ++OutputIndex;
+            }
+            BitmaskComponent >>= 1;
+        }
+        ComponentBaseInDispatch += BITMASK_COMPONENT_BITSIZE;
+    }
+}
+
+RWStructuredBuffer<FGaussianSplat> ModelsOut_0;
+RWStructuredBuffer<FGaussianSplat> ModelsOut_1;
+RWStructuredBuffer<FGaussianSplat> ModelsOut_2;
+RWStructuredBuffer<FGaussianSplat> ModelsOut_3;
+RWStructuredBuffer<FGaussianSplat> ModelsOut_4;
+RWStructuredBuffer<FGaussianSplat> ModelsOut_5;
+RWStructuredBuffer<FGaussianSplat> ModelsOut_6;
+RWStructuredBuffer<FGaussianSplat> ModelsOut_7;
+RWStructuredBuffer<FGaussianSplat> ModelsOut_8;
+RWStructuredBuffer<FGaussianSplat> ModelsOut_9;
+RWStructuredBuffer<FGaussianSplat> ModelsOut_10;
+RWStructuredBuffer<FGaussianSplat> ModelsOut_11;
+RWStructuredBuffer<FGaussianSplat> ModelsOut_12;
+RWStructuredBuffer<FGaussianSplat> ModelsOut_13;
+RWStructuredBuffer<FGaussianSplat> ModelsOut_14;
+RWStructuredBuffer<FGaussianSplat> ModelsOut_15;
+float3 SelectionOrigin;
+float3x4 DefaultModelRotationAndTranslation;
+float3 DefaultModelScale;
+
+
+void SetGaussianSplat(in uint ModelElementIndex, in FGaussianSplat GaussianSplat)
+{
+    switch (ModelElementIndex / CHUNK_LEN)
+    {
+        default:
+            ModelsOut_0[ModelElementIndex % CHUNK_LEN] = GaussianSplat;
+#define CASE(N) \
+        case N: \
+            ModelsOut_##N[ModelElementIndex % CHUNK_LEN] = GaussianSplat;
+        CASE(1)
+        CASE(2)
+        CASE(3)
+        CASE(4)
+        CASE(5)
+        CASE(6)
+        CASE(7)
+        CASE(8)
+        CASE(9)
+        CASE(10)
+        CASE(11)
+        CASE(12)
+        CASE(13)
+        CASE(14)
+        CASE(15)
+#undef CASE
+    }
+}
+
+FGaussianSplattingTransform GetDefaultModelTransform()
+{
+    FGaussianSplattingTransform DefaultModelTransform =
+    {
+        DefaultModelRotationAndTranslation,
+        DefaultModelScale,
+    };
+    return DefaultModelTransform;
+}
+
+#if COMPILER_SUPPORTS_WAVE_SIZE
+WAVESIZE(WAVE_OP_WAVE_SIZE)
+#endif
+[numthreads(NUM_THREADS_PER_GROUP, 1, 1)]
+void GatherCS(
+    in uint3 GroupID : SV_GroupID,
+    in uint IndexInGroup : SV_GroupIndex
+)
+{
+    check(WAVE_OP_WAVE_SIZE == WaveGetLaneCount());
+    uint Index = GetUnWrappedDispatchThreadId(
+        GroupID,
+        IndexInGroup,
+        NUM_THREADS_PER_GROUP
+    );
+    if (Index >= Count)
+    {
+        return;
+    }
+    uint ElementIndex = ElementIndicesIn[Index];
+    uint InstanceIndex;
+    uint ModelElementIndex;
+    DecomposeElementIndex(ElementIndex, InstanceIndex, ModelElementIndex);
+    FGaussianSplattingInstance Instance = Instances[InstanceIndex];
+    FGaussianSplat GaussianSplat = Instance.GetGaussianSplat(ModelElementIndex);
+    GaussianSplat.Transform.MultiplyBy(Instance.ModelTransform);
+    GaussianSplat.Transform.AddToTranslation(-SelectionOrigin);
+    GaussianSplat.Transform.DivideBy(GetDefaultModelTransform());
+    SetGaussianSplat(Index, GaussianSplat);
+}

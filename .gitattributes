@@ -1,0 +1,5 @@
+*.cs eol=lf
+*.ush eol=lf
+*.usf eol=lf
+*.h eol=lf
+*.cpp eol=lf

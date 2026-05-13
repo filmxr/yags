@@ -1,0 +1,20 @@
+#include "/Engine/Public/Platform.ush"
+#include "/Engine/Private/Common.ush"
+
+int4 InputRectMinAndSize;
+Texture2D<float> InputDepth;
+RWTexture2D<float> OutputDepth;
+
+[numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, 1)]
+void DepthCopyCS(
+    in uint2 Offset : SV_DispatchThreadID
+)
+{
+    if (any(InputRectMinAndSize.xy + Offset >= InputRectMinAndSize.zw))
+    {
+        return;
+    }
+    float DeviceZ = InputDepth[InputRectMinAndSize.xy + Offset];
+    float ReversedZ = (FarDepthValue - DeviceZ) / (FarDepthValue - NearDepthValue);
+    OutputDepth[Offset] = ReversedZ;
+}

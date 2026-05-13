@@ -1,0 +1,438 @@
+#include "Common.ush"
+#include "GaussianSplattingViewMatrix.usf"
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/ComputeShaderUtils.ush"
+#include "/Engine/Private/GammaCorrectionCommon.ush"
+#include "/Engine/Private/ColorSpace.ush"
+
+struct VSOutput
+{
+    noperspective float4 Position : SV_Position;
+    nointerpolation float4 Color : COLOR;
+};
+
+float4x4 ProjectionMatrix;
+uint Count;
+
+bool IsPerspectiveProjection()
+{
+    return ProjectionMatrix[3][3] < 1.0f;
+}
+
+float2x3 GetJacobian(
+    in FGaussianSplattingInstance Instance,
+    in float3 ViewPosition
+)
+{
+    float2 Scale = Instance.Scale * ProjectionMatrix._m00_m11;
+    if (IsPerspectiveProjection())
+    {
+        float Perspective = 1.0f / ViewPosition.z;
+        Scale *= Perspective;
+        float2 Offset = -Perspective * (ViewPosition.xy * Scale);
+        float2x3 J =
+        {
+            Scale.x, 0.0f, Offset.x,
+            0.0f, Scale.y, Offset.y,
+        };
+        return J;
+    }
+    else
+    {
+        float2x3 J =
+        {
+            Scale.x, 0.0f, 0.0f,
+            0.0f, Scale.y, 0.0f,
+        };
+        return J;
+    }
+}
+
+void GetGaussianSplatQuad(
+    in FGaussianSplattingInstance Instance,
+    in FGaussianSplat GaussianSplat,
+    in float3 WorldPosition,
+    out float3 ScreenPosition,
+    out float2 MajorAxis,
+    out float2 MinorAxis
+)
+{
+    float3 ViewPosition = WorldToView(WorldPosition);
+    float4 P = mul(float4(ViewPosition, 1.0f), ProjectionMatrix);
+    ScreenPosition = P.xyz / P.w;
+    float2x3 M = mul(
+        GetJacobian(Instance, ViewPosition),
+        mul(
+            GetRotationAndScale(ViewMatrix),
+            mul(
+                Instance.ModelTransform.GetRotation(),
+                GaussianSplat.Transform.GetRotation()
+            )
+        )
+    );
+    float3 Scale = GaussianSplat.Transform.Scale * Instance.ModelTransform.Scale;
+    M[0] *= Scale;
+    M[1] *= Scale;
+    float2x2 Cov2D = mul(M, transpose(M));
+    float HalfTrace = 0.5f * (Cov2D[0][0] + Cov2D[1][1]);
+    float Radius = sqrt(HalfTrace * HalfTrace - determinant(Cov2D));
+    float Lambda1 = clamp(HalfTrace + Radius, 0.0f, Instance.MaxLambda);
+    float Lambda2 = clamp(HalfTrace - Radius, 0.0f, Instance.MaxLambda);
+    MajorAxis = float2(Cov2D[1][0], Cov2D[1][1] - Lambda2);
+    MajorAxis *= sqrt(Lambda1 / max(dot(MajorAxis, MajorAxis), 1e-8f));
+    MinorAxis = float2(Cov2D[0][0] - Lambda1, Cov2D[0][1]);
+    MinorAxis *= sqrt(Lambda2 / max(dot(MinorAxis, MinorAxis), 1e-8f));
+}
+
+float3 GetQuadVertex(
+    in float3 ScreenPosition,
+    in float2 MajorAxis,
+    in float2 MinorAxis,
+    in uint QuadVertexIndex
+)
+{
+    float2 QuadCornerUV = float2(QuadVertexIndex & 1, QuadVertexIndex >> 1) - 0.5f;
+    float2 ScreenOffset = QuadCornerUV.x * MajorAxis + QuadCornerUV.y * MinorAxis;
+    return float3(ScreenPosition.xy + ScreenOffset, ScreenPosition.z);
+}
+
+float4 GetColor(
+    in FGaussianSplattingInstance Instance,
+    in FGaussianSplat GaussianSplat,
+    in float3 WorldPosition
+)
+{
+    float3 Color = GaussianSplat.Albedo.rgb;
+#if !DEPTH_PASS
+    FGaussianSplattingAppearance Appearance = Instance.GetAppearance(WorldPosition);
+#if 1 < MAX_SH_ORDER
+    if (0 < Appearance.MaxSHDegree)
+    {
+        float3 CameraWorldPosition = GetTranslation(ViewMatrix);
+        float3 ModelPosition = GaussianSplat.Transform.GetTranslation();
+        float3 Dir = normalize(Instance.WorldToModel(CameraWorldPosition) - ModelPosition);
+        Color += GaussianSplat.SH[0] * Dir.y;
+        Color += GaussianSplat.SH[1] * Dir.z;
+        Color += GaussianSplat.SH[2] * Dir.x;
+#if 2 < MAX_SH_ORDER
+        if (1 < Appearance.MaxSHDegree)
+        {
+            float XY = Dir.x * Dir.y;
+            float YZ = Dir.y * Dir.z;
+            float ZX = Dir.z * Dir.x;
+            float XX = Dir.x * Dir.x;
+            float YY = Dir.y * Dir.y;
+            float ZZ = Dir.z * Dir.z;
+            Color += GaussianSplat.SH[3] * XY;
+            Color += GaussianSplat.SH[4] * YZ;
+            Color += GaussianSplat.SH[5] * (3.0f * ZZ - 1.0f);
+            Color += GaussianSplat.SH[6] * ZX;
+            Color += GaussianSplat.SH[7] * (XX - YY);
+#if 3 < MAX_SH_ORDER
+            if (2 < Appearance.MaxSHDegree)
+            {
+                float C = 5.0f * ZZ - 1.0f;
+                Color += GaussianSplat.SH[8] * Dir.y * (3.0f * XX - YY);
+                Color += GaussianSplat.SH[9] * Dir.z * XY;
+                Color += GaussianSplat.SH[10] * Dir.y * C;
+                Color += GaussianSplat.SH[11] * Dir.z * (C - 2.0f);
+                Color += GaussianSplat.SH[12] * Dir.x * C;
+                Color += GaussianSplat.SH[13] * Dir.z * (XX - YY);
+                Color += GaussianSplat.SH[14] * Dir.x * (XX - 3.0f * YY);
+            }
+#endif
+        }
+#endif
+    }
+#endif
+    {
+        if (Instance.Flags & INSTANCE_FLAG_IS_SRGB)
+        {
+            Color = sRGBToLinear(Color);
+        }
+        if (any(Appearance.HSV != float3(0.0f, 0.0f, 0.0f)))
+        {
+            Color = HSV_2_LinearRGB(LinearRGB_2_HSV(Color) + Appearance.HSV);
+        }
+        Color *= Appearance.Tint;
+        if (Appearance.Gamma != 1.0f)
+        {
+            Color = pow(Color, Appearance.Gamma);
+        }
+    }
+#endif
+    return float4(Color, GaussianSplat.Albedo.a);
+}
+
+Buffer<uint> ElementIndices;
+
+void MainVS(
+    in uint Index : SV_InstanceID,
+    in uint QuadVertexIndex : SV_VertexID,
+    out VSOutput Output
+)
+{
+#if DEPTH_PASS
+    Index = Count - 1 - Index;
+#endif
+    uint ElementIndex = ElementIndices[Index];
+    uint InstanceIndex;
+    uint ModelElementIndex;
+    DecomposeElementIndex(
+        ElementIndex,
+        InstanceIndex,
+        ModelElementIndex
+    );
+    FGaussianSplattingInstance Instance = Instances[InstanceIndex];
+    FGaussianSplat GaussianSplat = Instance.GetGaussianSplat(ModelElementIndex);
+    float3 ModelPosition = GaussianSplat.Transform.GetTranslation();
+    float3 WorldPosition = Instance.ModelToWorld(ModelPosition);
+    if (!Instance.IsShown(WorldPosition))
+    {
+        Output.Position = float4(0.0f, 0.0f, -1.0f, 1.0f);
+        if ((QuadVertexIndex == 0) || (QuadVertexIndex == VERTEX_COUNT_PER_QUAD - 1))  // provoking vertices
+        {
+            Output.Color = float4(1.0f, 0.0f, 0.0f, 1.0f);
+        }
+        return;
+    }
+    float3 ScreenPosition;
+    float2 MajorAxis;
+    float2 MinorAxis;
+    GetGaussianSplatQuad(
+        Instance,
+        GaussianSplat,
+        WorldPosition,
+        ScreenPosition,
+        MajorAxis,
+        MinorAxis
+    );
+    Output.Position = float4(GetQuadVertex(ScreenPosition, MajorAxis, MinorAxis, QuadVertexIndex), 1.0f);
+    if ((QuadVertexIndex == 0) || (QuadVertexIndex == VERTEX_COUNT_PER_QUAD - 1))  // provoking vertices
+    {
+        Output.Color = GetColor(
+                Instance,
+                GaussianSplat,
+                WorldPosition
+            );
+    }
+}
+
+bool GetGaussianSplatQuadVertices(
+    in FGaussianSplattingInstance Instance,
+    in FGaussianSplat GaussianSplat,
+    in float3 WorldPosition,
+    out float3 QuadVertices[VERTEX_COUNT_PER_QUAD]
+)
+{
+    float3 ScreenPosition;
+    float2 MajorAxis;
+    float2 MinorAxis;
+    GetGaussianSplatQuad(
+        Instance,
+        GaussianSplat,
+        WorldPosition,
+        ScreenPosition,
+        MajorAxis,
+        MinorAxis
+    );
+    bool bIsVisible = false;
+    const float2 ScreenCorner = float2(1.0f, 1.0f);
+    [unroll]
+    for (uint QuadVertexIndex = 0; QuadVertexIndex < VERTEX_COUNT_PER_QUAD; ++QuadVertexIndex)
+    {
+        float3 QuadVertex = GetQuadVertex(ScreenPosition, MajorAxis, MinorAxis, QuadVertexIndex);
+        bIsVisible = bIsVisible || (all(abs(QuadVertex.xy) <= ScreenCorner));
+        QuadVertices[QuadVertexIndex] = QuadVertex;
+    }
+    if (!bIsVisible)
+    {
+        float2 C = 0.5f * (MajorAxis + MinorAxis);
+        float L = dot(ScreenPosition.xy, ScreenPosition.xy) - dot(C, C) + dot(ScreenCorner, ScreenCorner);
+        float2 D = 2.0f * (abs(ScreenPosition.xy) * ScreenCorner);
+        bIsVisible = (L <= D.x + D.y);
+    }
+    return bIsVisible;
+}
+
+struct MSPayload
+{
+    uint SkipCount;
+};
+
+Buffer<uint> SortKeys;
+
+uint GetSkipCount()
+{
+    uint RemainingCount = Count;
+    uint SkipCount = 0;
+    const uint NearPlane = DepthAsSortKey(NearDepthValue);
+    while (RemainingCount > 0)  // UpperBound
+    {
+        uint Step = RemainingCount / 2;
+        uint Middle = SkipCount + Step;
+        if (SortKeys[Middle] < NearPlane)  // should be strict for SortKeyMaskShift == 1
+        {
+            SkipCount = Middle + 1;
+            RemainingCount -= Step + 1;
+        }
+        else
+        {
+            RemainingCount = Step;
+        }
+    }
+    return SkipCount;
+}
+
+[numthreads(1, 1, 1)]
+void MainAS()
+{
+    uint SkipCount = GetSkipCount();
+    uint3 GroupCount = GetGroupCountWrapped(
+            DivideAndRoundUp(Count - SkipCount, NUM_THREADS_PER_GROUP),
+            uint2(DIMENSION_LIMIT_X, DIMENSION_LIMIT_Y)
+        );
+    MSPayload Payload;
+    Payload.SkipCount = SkipCount;
+    DispatchMesh(GroupCount.x, GroupCount.y, GroupCount.z, Payload);
+}
+
+groupshared uint GroupQuadCount;
+
+[numthreads(NUM_THREADS_PER_GROUP, 1, 1)]
+[outputtopology("triangle")]
+void MainMS(
+    in uint3 GroupID : SV_GroupID,
+    in uint GroupThreadIndex : SV_GroupIndex,
+    in payload MSPayload Payload,
+    out vertices VSOutput Vertices[NUM_THREADS_PER_GROUP * VERTEX_COUNT_PER_QUAD],
+    out indices uint3 Triangles[NUM_THREADS_PER_GROUP * TRIANGLE_COUNT_PER_QUAD]
+)
+{
+    bool bIsVisible = false;
+    float3 QuadVertices[VERTEX_COUNT_PER_QUAD];
+    float4 Color;
+    uint Index = Payload.SkipCount + GetUnWrappedDispatchThreadId(
+            GroupID,
+            GroupThreadIndex,
+            NUM_THREADS_PER_GROUP
+        );
+    if (Index < Count)
+    {
+#if DEPTH_PASS
+        Index = Count - 1 - (Index - Payload.SkipCount);
+#endif
+        uint ElementIndex = ElementIndices[Index];
+        uint InstanceIndex;
+        uint ModelElementIndex;
+        DecomposeElementIndex(
+            ElementIndex,
+            InstanceIndex,
+            ModelElementIndex
+        );
+        FGaussianSplattingInstance Instance = Instances[InstanceIndex];
+        FGaussianSplat GaussianSplat = Instance.GetGaussianSplat(ModelElementIndex);
+        float3 ModelPosition = GaussianSplat.Transform.GetTranslation();
+        float3 WorldPosition = Instance.ModelToWorld(ModelPosition);
+        bIsVisible = Instance.IsShown(WorldPosition);
+        if (bIsVisible)
+        {
+            bIsVisible = GetGaussianSplatQuadVertices(
+                Instance,
+                GaussianSplat,
+                WorldPosition,
+                QuadVertices
+            );
+            if (bIsVisible)
+            {
+                Color = GetColor(
+                    Instance,
+                    GaussianSplat,
+                    WorldPosition
+                );
+            }
+        }
+    }
+    if (GroupThreadIndex == 0)
+    {
+        GroupQuadCount = 0;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    uint WaveQuadCount = WaveActiveCountBits(bIsVisible);
+    uint WaveQuadBase;
+    if (WaveIsFirstLane())
+    {
+        InterlockedAdd(GroupQuadCount, WaveQuadCount, WaveQuadBase);
+    }
+    WaveQuadBase = WaveReadLaneFirst(WaveQuadBase);
+    GroupMemoryBarrierWithGroupSync();
+    SetMeshOutputCounts(GroupQuadCount * VERTEX_COUNT_PER_QUAD, GroupQuadCount * TRIANGLE_COUNT_PER_QUAD);
+    [branch]
+    if (bIsVisible)
+    {
+        uint WaveQuadIndex = WaveQuadBase + WavePrefixCountBits(true);
+        uint QuadVertexBase = VERTEX_COUNT_PER_QUAD * WaveQuadIndex;
+        [unroll]
+        for (uint QuadVertexIndex = 0; QuadVertexIndex < VERTEX_COUNT_PER_QUAD; ++QuadVertexIndex)
+        {
+            Vertices[QuadVertexBase + QuadVertexIndex].Position = float4(QuadVertices[QuadVertexIndex], 1.0f);
+        }
+        uint QuadIndexBase = TRIANGLE_COUNT_PER_QUAD * WaveQuadIndex;
+        [unroll]
+        for (uint TriangleIndex = 0; TriangleIndex < TRIANGLE_COUNT_PER_QUAD; ++TriangleIndex)
+        {
+            uint3 VertexIndices = QuadVertexBase + uint3(
+                    QuadIndices[3 * TriangleIndex + 0],
+                    QuadIndices[3 * TriangleIndex + 1],
+                    QuadIndices[3 * TriangleIndex + 2]
+                );
+            Triangles[QuadIndexBase + TriangleIndex] = VertexIndices;
+            Vertices[VertexIndices[0]].Color = Color; // provoking vertex
+        }
+    }
+}
+
+EARLYDEPTHSTENCIL
+float4 ColorPS(
+    in VSOutput Input,
+    in noperspective float3 Barycentrics : SV_Barycentrics
+) : SV_Target0
+{
+    float2 BarycentricsOffset = Barycentrics.yz - 0.5f;
+    float R = dot(BarycentricsOffset, BarycentricsOffset);
+    if (R > 0.25f)
+    {
+#if SHOW_DEBUG_QUAD_BORDER
+        return float4(Barycentrics, 1.0f);
+#else
+        discard;
+#endif
+    }
+    float A = Input.Color.a * exp(-16.0f * R);
+    return float4(Input.Color.rgb * A, A);
+}
+
+#if ENABLE_ALPHA_DEPTH_CLIP
+float AlphaDepthClip;
+#endif
+
+EARLYDEPTHSTENCIL
+float4 DepthPS(
+    in VSOutput Input,
+    in noperspective float3 Barycentrics : SV_Barycentrics
+) : SV_Target0
+{
+    float2 BarycentricsOffset = Barycentrics.yz - 0.5f;
+    float R = dot(BarycentricsOffset, BarycentricsOffset);
+    float A = Input.Color.a * exp(-16.0f * R);
+#if ENABLE_ALPHA_DEPTH_CLIP
+    if (A < AlphaDepthClip)
+    {
+        discard;
+    }
+#endif
+    float DeviceZ = Input.Position.z / Input.Position.w;
+    float ReversedZ = (FarDepthValue - DeviceZ) / (FarDepthValue - NearDepthValue);
+    return float4(ReversedZ, 0.0f, 0.0f, A);
+}

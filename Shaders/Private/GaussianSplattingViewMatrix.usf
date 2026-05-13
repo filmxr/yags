@@ -1,0 +1,8 @@
+#include "Common.ush"
+
+float3x4 ViewMatrix;
+
+float3 WorldToView(in float3 WorldPosition)
+{
+    return TransformPosition(ViewMatrix, WorldPosition);
+}
