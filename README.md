@@ -1,7 +1,16 @@
-# YaGS — Unreal Engine Plugin for 3D Gaussian Splatting
+# YaGS · Film XR Edition
+
+**Unreal Engine Plugin for 3D Gaussian Splatting**
 
 > **Platform:** Unreal Engine 5.5 – 5.7
 > **Format:** editor and runtime plugin (.uplugin)
+
+> 📦 **The Film XR Edition ships ready-to-use binary releases** of the original [yandex/yags](https://github.com/yandex/yags) plugin (upstream is source-only).
+> **[⬇ Download the release for your engine version](https://github.com/filmxr/yags/releases)** — prebuilt for **UE 5.5 / 5.6 / 5.7 (Win64)** — and follow [Installing a Prebuilt Release](#installing-a-prebuilt-release).
+
+![YaGS plugin in the Unreal Engine editor](docs/media/yags_teaser.gif)
+
+▶️ **[Watch the full 1-minute plugin demo (MP4)](docs/media/yags_promo_1min.mp4)**
 
 ---
 
@@ -16,12 +25,15 @@
   - [Color Correction](#color-correction)
   - [Project Settings](#project-settings)
 - [System Requirements](#system-requirements)
+- [Installing a Prebuilt Release](#installing-a-prebuilt-release)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Rendering Configuration](#rendering-configuration)
 - [Editing Workflow](#editing-workflow)
 - [Limitations](#limitations)
 - [Backports](#backports)
+- [YaGS in Virtual Production](#yags-in-virtual-production)
+- [About the Film XR Edition](#about-the-film-xr-edition)
 
 ---
 
@@ -145,6 +157,42 @@ Project Settings → Engine → YaGS Settings
 | **OS** | Windows 10 (DX12) | Windows 11 |
 
 > The Mesh Shader backend requires `D3D12_MESH_SHADER` / `VK_EXT_mesh_shader` support. On GPUs without support, Vertex Shader is used automatically.
+
+---
+
+## Installing a Prebuilt Release
+
+Prebuilt plugin packages for **Windows (Win64)** — with editor and runtime binaries included, **no compilation required** — are published on the [Releases page](https://github.com/filmxr/yags/releases). Each Unreal Engine version has its own release — download the one matching the engine you have installed:
+
+| Your Unreal Engine version | Release to download |
+|---|---|
+| 5.7.x | [**YaGS 1.0 for UE 5.7**](https://github.com/filmxr/yags/releases/tag/v1.0.0-ue5.7) — `YaGS_UE5.7_Win64.zip` |
+| 5.6.x | [**YaGS 1.0 for UE 5.6**](https://github.com/filmxr/yags/releases/tag/v1.0.0-ue5.6) — `YaGS_UE5.6_Win64.zip` |
+| 5.5.x | [**YaGS 1.0 for UE 5.5**](https://github.com/filmxr/yags/releases/tag/v1.0.0-ue5.5) — `YaGS_UE5.5_Win64.zip` |
+
+1. Download the archive matching your engine version.
+2. Extract it — you get a single `YaGS` folder.
+3. Copy the `YaGS` folder into your project's `Plugins` directory (create the directory if it does not exist):
+
+   ```
+   MyProject/
+   └── Plugins/
+       └── YaGS/
+           ├── YaGS.uplugin
+           ├── Binaries/
+           ├── Source/
+           └── ...
+   ```
+
+   Alternatively, install it engine-wide for all projects: `<UE_Root>/Engine/Plugins/Runtime/YaGS/`.
+
+4. Open your project and enable the plugin:
+
+   ```
+   Edit → Plugins → search "YaGS" → enable → restart the editor
+   ```
+
+> Because binaries are included, the editor should **not** ask to rebuild the plugin. If it does (engine version mismatch), download the archive matching your engine version or build from source (see [Installation](#installation) below).
 
 ---
 
@@ -294,6 +342,26 @@ In the same Volume Actors (`Place Actors → Volumes → Gaussian Splatting Appe
 
 ---
 
+## YaGS in Virtual Production
+
+YaGS has been used on real virtual production shoots: 3D Gaussian Splatting environments rendered in Unreal Engine and displayed live on LED-wall stages behind the actors — no green screen, no compositing. The plugin was developed for creating photorealistic digital doubles of real locations for film production; the team behind it describes the technology and its production use in [this article (in Russian)](https://habr.com/ru/companies/yandex/articles/1052328/).
+
 <p align="center">
-  <sub>YaGS — Yet another Gaussian Splatting plugin for Unreal Engine</sub>
+  <img src="docs/media/vp_led_wall_stage.jpg" width="49%" alt="3DGS environment on a curved LED wall during a virtual production shoot"/>
+  <img src="docs/media/vp_led_wall_shoot.jpg" width="49%" alt="Actor filmed against a 3DGS cityscape rendered on an LED wall"/>
+</p>
+<p align="center">
+  <img src="docs/media/vp_set_monitor.jpg" width="80%" alt="On-set camera monitor showing the in-camera VFX result with a 3DGS background"/>
+</p>
+
+---
+
+## About the Film XR Edition
+
+**YaGS · Film XR Edition** is a fork of [yandex/yags](https://github.com/yandex/yags) maintained by [Film XR](https://github.com/filmxr). The upstream repository publishes source code only; this edition additionally provides **prebuilt binary releases** for UE 5.5–5.7 and real-world virtual production examples. All plugin code © YANDEX LLC, licensed under the [Apache License 2.0](LICENSE).
+
+---
+
+<p align="center">
+  <sub>YaGS — Yet another Gaussian Splatting plugin for Unreal Engine · Film XR Edition</sub>
 </p>
