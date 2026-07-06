@@ -364,6 +364,7 @@ YaGS has been used on real virtual production shoots: 3D Gaussian Splatting envi
 
 **Open to collaboration on Gaussian Splatting production** — location and people scanning, 3DGS environments for virtual production (LED wall / green screen), and 3DGS pipelines for film and XR:
 
+- 🌐 [filmxr.ee/3dgs](https://filmxr.ee/3dgs)
 - 📧 **Georgy Molodtsov** — [gm@filmxr.ee](mailto:gm@filmxr.ee)
 - 💼 [LinkedIn](https://www.linkedin.com/in/gmolodtsov/)
 
