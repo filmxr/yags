@@ -360,6 +360,13 @@ YaGS has been used on real virtual production shoots: 3D Gaussian Splatting envi
 
 **YaGS · Film XR Edition** is a fork of [yandex/yags](https://github.com/yandex/yags) maintained by [Film XR](https://github.com/filmxr). The upstream repository publishes source code only; this edition additionally provides **prebuilt binary releases** for UE 5.5–5.7 and real-world virtual production examples. All plugin code © YANDEX LLC, licensed under the [Apache License 2.0](LICENSE).
 
+### Contact & Collaboration
+
+**Open to collaboration on Gaussian Splatting production** — location and people scanning, 3DGS environments for virtual production (LED wall / green screen), and 3DGS pipelines for film and XR:
+
+- 📧 **Georgy Molodtsov** — [gm@filmxr.ee](mailto:gm@filmxr.ee)
+- 💼 [LinkedIn](https://www.linkedin.com/in/gmolodtsov/)
+
 ---
 
 <p align="center">
